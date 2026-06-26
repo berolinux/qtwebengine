@@ -5681,6 +5681,16 @@ void WebContentsImpl::ShowCreatedWidget(int process_id,
     return;
   }
 
+  RenderWidgetHostImpl* rwh = GetPrimaryMainFrame()->GetRenderWidgetHost();
+  if (base::FeatureList::IsEnabled(
+          blink::features::kBlockSelectPopupUnfocusedWindow) &&
+      !rwh->is_active()) {
+    // If the OS window isn't focused, then don't open select element popups for
+    // it: https://issues.chromium.org/issues/365089001
+    widget_host_view->host()->ShutdownAndDestroyWidget(true);
+    return;
+  }
+
   // GetOutermostWebContents() returns |this| if there are no outer WebContents.
   auto* outer_web_contents = GetOuterWebContents();
   auto* outermost_web_contents = GetOutermostWebContents();
@@ -5718,6 +5728,13 @@ void WebContentsImpl::ShowCreatedWidget(int process_id,
   }
 
   RenderWidgetHostImpl* render_widget_host_impl = widget_host_view->host();
+
+  // A background tab cannot show a popup over the active tab.
+  if (GetVisibility() != Visibility::VISIBLE) {
+    render_widget_host_impl->ShutdownAndDestroyWidget(true);
+    return;
+  }
+
   auto permission_exclusion_area_bounds =
       PermissionControllerImpl::FromBrowserContext(GetBrowserContext())
           ->GetExclusionAreaBoundsInScreen(outermost_web_contents);
@@ -6751,9 +6768,7 @@ void WebContentsImpl::SaveFrameWithHeaders(
             "triggered by user request."
           policy_exception_justification: "Not implemented."
         })");
-  auto params = std::make_unique<download::DownloadUrlParameters>(
-      url, rfh->GetProcess()->GetDeprecatedID(), rfh->GetRoutingID(),
-      traffic_annotation);
+  auto params = rfh->CreateDownloadUrlParameters(url, traffic_annotation);
   params->set_referrer(referrer.url);
   params->set_referrer_policy(
       Referrer::ReferrerPolicyForUrlRequest(referrer.policy));
@@ -6787,6 +6802,7 @@ void WebContentsImpl::SaveFrameWithHeaders(
           .GetLastCommittedEntry()
           ->GetFrameEntry(frame_tree_node);
   if (frame_navigation_entry) {
+    // Replay the original initiator, rather than using the current frame origin
     params->set_initiator(frame_navigation_entry->initiator_origin());
   }
 
@@ -7637,16 +7653,8 @@ void WebContentsImpl::DidNavigateMainFramePreCommit(
   }
 #endif
 
-  // Ensure fullscreen mode is exited before committing the navigation to a
-  // different page.  The next page will not start out assuming it is in
-  // fullscreen mode.
   if (navigation_is_within_page) {
-    // No page change?  Then, the renderer and browser can remain in fullscreen.
     return;
-  }
-
-  if (IsFullscreen()) {
-    ExitFullscreen(false);
   }
 
   auto* rwhvb = static_cast<RenderWidgetHostViewBase*>(
@@ -7655,8 +7663,51 @@ void WebContentsImpl::DidNavigateMainFramePreCommit(
     rwhvb->OnOldViewDidNavigatePreCommit();
   }
 
-  // Clean up keyboard lock state when navigating.
   CancelKeyboardLock(keyboard_lock_widget_);
+}
+
+void WebContentsImpl::DidNavigateAnyFramePreCommit(
+    NavigationHandle* navigation_handle,
+    bool navigation_is_within_page) {
+  // Ensure fullscreen mode is exited before committing the navigation to a
+  // different page.  The next page will not start out assuming it is in
+  // fullscreen mode.
+  if (navigation_is_within_page || !IsFullscreen()) {
+    return;
+  }
+
+  bool should_exit_fullscreen = false;
+  if (navigation_handle->IsInPrimaryMainFrame()) {
+    should_exit_fullscreen = true;
+  } else {
+    // For iframe navigation, exit if the fullscreen was requested by the
+    // iframe or one of its descendants.
+    const FrameTreeNodeId navigating_id =
+        navigation_handle->GetFrameTreeNodeId();
+    should_exit_fullscreen =
+        std::any_of(fullscreen_frames_.begin(), fullscreen_frames_.end(),
+                    [navigating_id](RenderFrameHostImpl* rfh) {
+                      for (RenderFrameHostImpl* current = rfh; current;
+                           current = current->GetParentOrOuterDocument()) {
+                        if (current->frame_tree_node()->frame_tree_node_id() ==
+                            navigating_id) {
+                          return true;
+                        }
+                      }
+                      return false;
+                    });
+  }
+
+  if (should_exit_fullscreen) {
+    base::WeakPtr<WebContentsImpl> weak_this = weak_factory_.GetWeakPtr();
+    ExitFullscreen(false);
+
+    // If `this` gets destructed due to ExitFullscreen(), we need to exit early.
+    if (!weak_this) {
+      return;
+    }
+    CancelKeyboardLock(keyboard_lock_widget_);
+  }
 }
 
 void WebContentsImpl::DidNavigateMainFramePostCommit(

@@ -7,6 +7,11 @@
 #include <QtGui/qguiapplication.h>
 #include <qpa/qplatformnativeinterface.h>
 
+#include <drm_fourcc.h>
+#include <iomanip>
+#include <sstream>
+#include <xf86drm.h>
+
 #if QT_CONFIG(opengl)
 #include <QtGui/qopenglcontext.h>
 #endif
@@ -74,6 +79,49 @@ bool usingEGL()
     return false;
 #endif
 }
+
+std::string drmFormatModifierToString(const uint64_t modifier)
+{
+    if (modifier == DRM_FORMAT_MOD_LINEAR)
+        return "DRM_FORMAT_MOD_LINEAR";
+
+    if (modifier == DRM_FORMAT_MOD_INVALID)
+        return "DRM_FORMAT_MOD_INVALID";
+
+    // Vendor
+    std::stringstream ss;
+    if (char *vendorName = drmGetFormatModifierVendor(modifier)) {
+        ss << "[" << vendorName << "]";
+        free(vendorName);
+    }
+
+    // Modifier Code
+    if (char *modifierName = drmGetFormatModifierName(modifier)) {
+        // Unknown Vendor
+        if (ss.tellp() <= 0) {
+            uint8_t vendor = fourcc_mod_get_vendor(modifier);
+            ss << "[0x" << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(vendor)
+               << "]";
+        }
+
+        // Delimiter
+        ss << " ";
+
+        // Modifier Name
+        ss << modifierName;
+        free(modifierName);
+    } else {
+        // Delimiter
+        if (ss.tellp() > 0)
+            ss << " ";
+
+        // Raw Modifier
+        ss << "0x" << std::hex << std::setfill('0') << std::setw(16) << modifier;
+    }
+
+    return ss.str();
+}
+
 } // namespace OzoneUtilQt
 
 QT_END_NAMESPACE

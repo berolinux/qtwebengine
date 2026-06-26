@@ -23,6 +23,7 @@
 
 #if BUILDFLAG(IS_OZONE_X11) && QT_CONFIG(xcb_glx_plugin)
 #include "ozone/glx_helper.h"
+#include <GL/glx.h>
 #endif
 
 #if QT_CONFIG(egl)
@@ -157,6 +158,7 @@ QSGTexture *NativeSkiaOutputDeviceOpenGL::texture(QQuickWindow *win, uint32_t te
         if (m_contextState->gr_context_type() != gpu::GrContextType::kVulkan) {
             // Unable to fall back to Vulkan; aborting.
             qWarning("Failed to get native pixmap due to dma_buf acquisition failure.");
+            return nullptr;
         }
 
         sk_sp<SkImage> skImage = m_frontBuffer->skImage();
@@ -237,6 +239,11 @@ QSGTexture *NativeSkiaOutputDeviceOpenGL::texture(QQuickWindow *win, uint32_t te
             GLXHelper *glxHelper = GLXHelper::instance();
             auto *glxFun = glxHelper->functions();
 
+            if (nativePixmap->GetNumberOfPlanes() != 1) {
+                qFatal("GLX: Importing multiple planes is not supported: %zu",
+                       nativePixmap->GetNumberOfPlanes());
+            }
+
             const auto dmaBufFd = HANDLE_EINTR(dup(nativePixmap->GetDmaBufFd(0)));
             if (dmaBufFd < 0) {
                 qFatal("GLX: Could not import the dma-buf as an XPixmap because the FD couldn't be "
@@ -298,6 +305,11 @@ QSGTexture *NativeSkiaOutputDeviceOpenGL::texture(QQuickWindow *win, uint32_t te
             auto *eglFun = eglHelper->functions();
             auto *glExtFun = GLHelper::instance()->functions();
 
+            if (nativePixmap->GetNumberOfPlanes() != 1) {
+                qFatal("EGL: Importing multiple planes is not supported: %zu",
+                       nativePixmap->GetNumberOfPlanes());
+            }
+
             const auto dmaBufFd = HANDLE_EINTR(dup(nativePixmap->GetDmaBufFd(0)));
             if (dmaBufFd < 0) {
                 qFatal("EGL: Could not import the dma-buf as an EGLImage because the FD couldn't "
@@ -305,14 +317,19 @@ QSGTexture *NativeSkiaOutputDeviceOpenGL::texture(QQuickWindow *win, uint32_t te
             }
             base::ScopedFD scopedFd(dmaBufFd);
 
-            int drmFormat = ui::GetFourCCFormatFromBufferFormat(nativePixmap->GetBufferFormat());
-            uint64_t modifier = nativePixmap->GetBufferFormatModifier();
+            const uint32_t fourccFormat =
+                    ui::GetFourCCFormatFromBufferFormat(nativePixmap->GetBufferFormat());
+            qCDebug(lcWebEngineCompositor, "  FourCC Format: %s",
+                    ui::DrmFormatToString(fourccFormat));
+            const uint64_t modifier = nativePixmap->GetBufferFormatModifier();
+            qCDebug(lcWebEngineCompositor, "  DRM Format Modifier: %s",
+                    OzoneUtilQt::drmFormatModifierToString(modifier).c_str());
 
             // clang-format off
             EGLAttrib const attributeList[] = {
                 EGL_WIDTH, size().width(),
                 EGL_HEIGHT, size().height(),
-                EGL_LINUX_DRM_FOURCC_EXT, drmFormat,
+                EGL_LINUX_DRM_FOURCC_EXT, fourccFormat,
                 EGL_DMA_BUF_PLANE0_FD_EXT, scopedFd.get(),
                 EGL_DMA_BUF_PLANE0_OFFSET_EXT, static_cast<EGLAttrib>(nativePixmap->GetDmaBufOffset(0)),
                 EGL_DMA_BUF_PLANE0_PITCH_EXT, static_cast<EGLAttrib>(nativePixmap->GetDmaBufPitch(0)),
@@ -325,7 +342,13 @@ QSGTexture *NativeSkiaOutputDeviceOpenGL::texture(QQuickWindow *win, uint32_t te
             EGLImage eglImage =
                     eglFun->eglCreateImage(eglDisplay, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT,
                                            (EGLClientBuffer)NULL, attributeList);
-            Q_ASSERT(eglImage != EGL_NO_IMAGE_KHR);
+            if (eglImage == EGL_NO_IMAGE) {
+                qWarning("EGL: Failed to create EGLImage (Format: %s, Modifier: %s): %s",
+                         ui::DrmFormatToString(fourccFormat),
+                         OzoneUtilQt::drmFormatModifierToString(modifier).c_str(),
+                         eglHelper->getLastEGLErrorString());
+                return nullptr;
+            }
 
             glFun->glGenTextures(1, &glTexture);
             glFun->glBindTexture(GL_TEXTURE_2D, glTexture);

@@ -172,7 +172,12 @@ shared_library("QtWebEngineCore") {
 
   if (use_ozone) {
     _ozone_extra_directory = get_path_info(ozone_extra_path, "dir")
-    deps += [ "$_ozone_extra_directory:qt" ]
+    deps += [
+      "$_ozone_extra_directory:qt",
+      "//build/config/linux/libdrm",
+      "//ui/gfx/linux:drm",
+      "//ui/gfx/linux:gbm",
+    ]
 
     if (ozone_platform_x11) {
       configs += [ ":xcb-dri3" ]
@@ -397,6 +402,8 @@ source_set("qtwebengine_sources") {
     "//chrome/common/url_constants.h",
     "//chrome/common/webui_url_constants.cc",
     "//chrome/common/webui_url_constants.h",
+    "//components/security_interstitials/core/ssl_error_options_mask.cc",
+    "//components/security_interstitials/core/ssl_error_options_mask.h",
     "//ui/webui/mojo_web_ui_controller.cc",
     "//ui/webui/mojo_web_ui_controller.h",
     "//ui/webui/webui_util.cc",
@@ -404,24 +411,21 @@ source_set("qtwebengine_sources") {
   ]
   if (use_ozone) {
     deps += [
+      "//build/config/linux/libdrm",
       "//ui/gfx/linux:drm",
     ]
 
     sources += [
-      "//ui/ozone/platform/wayland/gpu/wayland_gl_egl_utility.cc",
-      "//ui/ozone/platform/wayland/gpu/wayland_gl_egl_utility.h",
+      "//ui/ozone/platform/wayland/common/drm_render_node_handle.cc",
+      "//ui/ozone/platform/wayland/common/drm_render_node_handle.h",
     ]
 
     if (ozone_platform_x11) {
       deps += [
-        "//ui/base/x:gl",
-        "//ui/gfx/linux:gpu_memory_buffer_support_x11",
         "//ui/gfx/x",
       ]
 
       sources += [
-        "//ui/ozone/platform/x11/gl_egl_utility_x11.cc",
-        "//ui/ozone/platform/x11/gl_egl_utility_x11.h",
         "//ui/ozone/platform/x11/native_pixmap_egl_x11_binding.cc",
         "//ui/ozone/platform/x11/native_pixmap_egl_x11_binding.h",
       ]
@@ -598,7 +602,6 @@ group("qtwebengine_resources") {
   deps = [
       "//chrome/app:generated_resources",
       "//chrome/browser:resources",
-      "//chrome/browser/resources:component_extension_resources",
       "//chrome/common:resources",
       "//chrome/browser/resources/device_log:resources",
       "//components/resources:components_resources",
@@ -608,6 +611,10 @@ group("qtwebengine_resources") {
       ":qtwebengine_repack_resources_devtools",
       ":qtwebengine_repack_locales_pack"
    ]
+
+   if(enable_extensions) {
+     deps += [ "//chrome/browser/resources:component_extension_resources" ]
+   }
 }
 
 repack("qtwebengine_repack_resources") {

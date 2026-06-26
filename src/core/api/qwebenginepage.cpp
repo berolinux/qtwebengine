@@ -518,15 +518,18 @@ void QWebEnginePagePrivate::windowCloseRejected()
 }
 
 void QWebEnginePagePrivate::runJavaScript(const QString &script, quint32 worldId, quint64 frameId,
-                                          const std::function<void(const QVariant &)> &callback)
+                                          QtPrivate::SlotObjUniquePtr callback)
 {
     ensureInitialized();
     if (adapter->lifecycleState() == WebContentsAdapter::LifecycleState::Discarded) {
         qWarning("runJavaScript: disabled in Discarded state");
-        if (callback)
-            callback(QVariant());
+        if (callback) {
+            QVariant var;
+            void* argv[] = { nullptr, &var };
+            callback->call(nullptr, argv);
+        }
     } else
-        adapter->runJavaScript(script, worldId, frameId, callback);
+        adapter->runJavaScript(script, worldId, frameId, std::move(callback));
 }
 
 void QWebEnginePagePrivate::didFetchDocumentMarkup(quint64 requestId, const QString& result)
@@ -1581,13 +1584,18 @@ void QWebEnginePagePrivate::contextMenuRequested(QWebEngineContextMenuRequest *d
     \sa acceptNavigationRequest()
 */
 
-void QWebEnginePagePrivate::navigationRequested(int navigationType, const QUrl &url, bool &accepted, bool isMainFrame, bool hasFormData)
+void QWebEnginePagePrivate::navigationRequested(int navigationType, const QUrl &url, bool &accepted,
+                                                bool isMainFrame, bool hasFormData,
+                                                bool userInitiated)
 {
     Q_Q(QWebEnginePage);
 
-    accepted = q->acceptNavigationRequest(url, static_cast<QWebEnginePage::NavigationType>(navigationType), isMainFrame);
+    accepted = q->acceptNavigationRequest(
+            url, static_cast<QWebEnginePage::NavigationType>(navigationType), isMainFrame);
     if (accepted) {
-        QWebEngineNavigationRequest navigationRequest(url, static_cast<QWebEngineNavigationRequest::NavigationType>(navigationType), isMainFrame, hasFormData);
+        QWebEngineNavigationRequest navigationRequest(
+                url, static_cast<QWebEngineNavigationRequest::NavigationType>(navigationType),
+                isMainFrame, hasFormData, userInitiated);
         Q_EMIT q->navigationRequested(navigationRequest);
         accepted = navigationRequest.isAccepted();
     }
@@ -2078,15 +2086,11 @@ void QWebEnginePage::setZoomFactor(qreal factor)
     }
 }
 
-void QWebEnginePage::runJavaScript(const QString& scriptSource, const std::function<void(const QVariant &)> &resultCallback)
-{
-    runJavaScript(scriptSource, QWebEngineScript::MainWorld, resultCallback);
-}
-
-void QWebEnginePage::runJavaScript(const QString& scriptSource, quint32 worldId, const std::function<void(const QVariant &)> &resultCallback)
+void QWebEnginePage::runJavaScriptImpl(const QString& scriptSource, quint32 worldId, QtPrivate::QSlotObjectBase *callback)
 {
     Q_D(QWebEnginePage);
-    d->runJavaScript(scriptSource, worldId, WebContentsAdapter::kUseMainFrameId, resultCallback);
+    QtPrivate::SlotObjUniquePtr callbackUniquePtr(callback);
+    d->runJavaScript(scriptSource, worldId, WebContentsAdapter::kUseMainFrameId, std::move(callbackUniquePtr));
 }
 
 /*!

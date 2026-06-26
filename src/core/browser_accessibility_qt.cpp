@@ -941,15 +941,68 @@ QAccessible::State BrowserAccessibilityInterface::state() const
 QStringList BrowserAccessibilityInterface::actionNames() const
 {
     QStringList actions;
-    if (q->HasState(ax::mojom::State::kFocusable))
+
+    // Separate check outside the actions list, since this function also checks the ARIA tree
+    if (q->node()->IsFocusable())
         actions << QAccessibleActionInterface::setFocusAction();
+
+    // Actions that map directly to QAccessible actions
+    auto supportedActions = q->GetSupportedActions();
+    for (auto &action : supportedActions) {
+        switch (action) {
+        case ax::mojom::Action::kShowContextMenu:
+            actions << QAccessibleActionInterface::showMenuAction();
+            break;
+        case ax::mojom::Action::kIncrement:
+            actions << QAccessibleActionInterface::increaseAction();
+            break;
+        case ax::mojom::Action::kDecrement:
+            actions << QAccessibleActionInterface::decreaseAction();
+            break;
+        default:
+            break;
+        }
+    }
+
+    // Role-based action matching. These are all activated by ax:mojom::Action::kDoDefault
+    switch (role()) {
+    case QAccessible::Button: // fall through
+    case QAccessible::Link:
+        actions << QAccessibleActionInterface::pressAction();
+        break;
+    case QAccessible::CheckBox: // fall through
+    case QAccessible::RadioButton:
+        actions << QAccessibleActionInterface::toggleAction();
+        break;
+    default:
+        break;
+    }
+
     return actions;
 }
 
 void BrowserAccessibilityInterface::doAction(const QString &actionName)
 {
-    if (actionName == QAccessibleActionInterface::setFocusAction())
+    if (actionName == QAccessibleActionInterface::setFocusAction()) {
         q->manager()->SetFocus(*q);
+    } else if (actionName == QAccessibleActionInterface::pressAction()
+            || actionName == QAccessibleActionInterface::toggleAction()) {
+        q->manager()->DoDefaultAction(*q);
+    } else {
+        ui::AXActionData actionData;
+        if (actionName == QAccessibleActionInterface::showMenuAction()) {
+            actionData.action = ax::mojom::Action::kShowContextMenu;
+        } else if (actionName == QAccessibleActionInterface::increaseAction()) {
+            actionData.action = ax::mojom::Action::kIncrement;
+        } else if (actionName == QAccessibleActionInterface::decreaseAction()) {
+            actionData.action = ax::mojom::Action::kDecrement;
+        }
+
+        if (actionData.action != ax::mojom::Action::kNone) {
+            actionData.target_node_id = q->node()->id();
+            q->AccessibilityPerformAction(actionData);
+        }
+    }
 }
 
 QStringList
@@ -1066,8 +1119,15 @@ QVariant BrowserAccessibilityInterface::currentValue() const
 
 void BrowserAccessibilityInterface::setCurrentValue(const QVariant &value)
 {
-    // not yet implemented anywhere in blink
-    QT_NOT_YET_IMPLEMENTED
+    bool isValid = false;
+    float val = value.toFloat(&isValid);
+    if (isValid) {
+        ui::AXActionData actionData;
+        actionData.action = ax::mojom::Action::kSetValue;
+        actionData.target_node_id = q->node()->id();
+        actionData.value = base::NumberToString(val);
+        q->AccessibilityPerformAction(actionData);
+    }
 }
 
 QVariant BrowserAccessibilityInterface::maximumValue() const

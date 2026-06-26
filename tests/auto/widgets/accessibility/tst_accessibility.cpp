@@ -20,6 +20,7 @@
 #include <QtWebEngineCore/private/qtwebenginecore-config_p.h>
 #include <QtGui/private/qaccessiblebridgeutils_p.h>
 #include <qtest.h>
+#include <qtestaccessible.h>
 #include <widgetutil.h>
 
 #include <QHBoxLayout>
@@ -49,6 +50,7 @@ private Q_SLOTS:
     void focusChild_data();
     void text();
     void value();
+    void setCurrentValue();
     void roles_data();
     void roles();
     void objectName();
@@ -56,6 +58,7 @@ private Q_SLOTS:
     void crossTreeParent();
     void tableCellInterface();
     void tableInterface();
+    void actions();
 };
 
 // This will be called before the first test function is executed.
@@ -335,6 +338,51 @@ void tst_Accessibility::value()
     QCOMPARE(progressBarValueInterface->currentValue().toInt(), 77);
     QCOMPARE(progressBarValueInterface->minimumValue().toInt(), 22);
     QCOMPARE(progressBarValueInterface->maximumValue().toInt(), 99);
+}
+
+void tst_Accessibility::setCurrentValue()
+{
+    // Test setting a slider's value through the value interface
+    QWebEngineView webView;
+    QSignalSpy spyFinished(&webView, &QWebEngineView::loadFinished);
+    setHtmlSync(webView.page(), "<html><body>"
+        "<input type='range' id='volume' name='volume' min='0' max='10' value='5'/>"
+        "</body></html>");
+    webView.show();
+
+    QAccessibleInterface *view = QAccessible::queryAccessibleInterface(&webView);
+    QTRY_COMPARE_WITH_TIMEOUT(view->child(0)->childCount(), 1, 20000);
+    QAccessibleInterface *document = view->child(0);
+
+    QCOMPARE(document->childCount(), 1); // Empty element with no ID. Should be fixed
+    QCOMPARE(document->child(0)->childCount(), 1);
+
+    QAccessibleInterface *slider = document->child(0)->child(0);
+    QVERIFY(slider);
+    QAccessibleValueInterface *sliderValue = slider->valueInterface();
+    QVERIFY(sliderValue);
+
+    QCOMPARE(sliderValue->currentValue().toInt(), 5);
+    sliderValue->setCurrentValue(QVariant(8));
+    QTRY_COMPARE(sliderValue->currentValue().toInt(), 8);
+    sliderValue->setCurrentValue(QVariant(10)); // Maximum
+    QTRY_COMPARE(sliderValue->currentValue().toInt(), 10);
+    sliderValue->setCurrentValue(QVariant(0)); // Minimum
+    QTRY_COMPARE(sliderValue->currentValue().toInt(), 0);
+    sliderValue->setCurrentValue(QVariant(11)); // Too high, should clamp
+    QTRY_COMPARE(sliderValue->currentValue().toInt(), 10);
+    sliderValue->setCurrentValue(QVariant(-1)); // Too low, should clamp
+    QTRY_COMPARE(sliderValue->currentValue().toInt(), 0);
+
+    // Test that calling with an invalid QVariant won't modify the value
+    QTestAccessibility::initialize();
+    QTestAccessibility::clearEvents();
+    sliderValue->setCurrentValue(QVariant("invalid"));
+    sliderValue->setCurrentValue(QVariant("7"));
+    QTRY_COMPARE(sliderValue->currentValue().toInt(), 7);
+
+    // The invalid variant should not have triggered an accessibility event
+    QCOMPARE(QTestAccessibility::events().size(), 1);
 }
 
 void tst_Accessibility::roles_data()
@@ -824,6 +872,84 @@ void tst_Accessibility::tableInterface()
     QCOMPARE(tableInterface->cellAt(0, 1)->child(0)->text(QAccessible::Name), QLatin1String("Column Header 2"));
     QCOMPARE(tableInterface->cellAt(1, 0)->child(0)->text(QAccessible::Name), QLatin1String("Row Header"));
     QCOMPARE(tableInterface->cellAt(1, 1)->child(0)->text(QAccessible::Name), QLatin1String("Cell"));
+}
+
+void tst_Accessibility::actions()
+{
+    QWebEngineView webView;
+    setHtmlSync(webView.page(), "<html><body>"
+        "   <input type='range' id='volume' name='volume' min='0' max='10' value='5'/>"
+        "   <input type='checkbox' id='checkbox' oninput='onChecked()'/>"
+        "   <button id='button' onclick='onPressed()'>Button</button>"
+        "   <a href='about:blank'>Link</a>"
+        "</body></html>"
+        "<script>"
+        "   let checked = false; let pressed = false;"
+        "   function onChecked(event) { checked = document.getElementById('checkbox').checked; }"
+        "   function onPressed() { pressed = true; }"
+        "</script>");
+    webView.show();
+
+    QAccessibleInterface *view = QAccessible::queryAccessibleInterface(&webView);
+    QTRY_COMPARE_WITH_TIMEOUT(view->child(0)->childCount(), 1, 20000);
+    QAccessibleInterface *document = view->child(0);
+
+    QCOMPARE(document->childCount(), 1); // Empty element with no ID. Should be fixed
+    QCOMPARE(document->child(0)->childCount(), 4);
+
+    {
+        // Test slider actions. We expect increase and decrease
+        QAccessibleInterface *interface = document->child(0)->child(0);
+        QVERIFY(interface);
+        QAccessibleValueInterface *value = interface->valueInterface();
+        QAccessibleActionInterface *action = interface->actionInterface();
+        QVERIFY(value);
+        QVERIFY(action);
+
+        QVERIFY(action->actionNames().contains(QAccessibleActionInterface::increaseAction()));
+        QVERIFY(action->actionNames().contains(QAccessibleActionInterface::decreaseAction()));
+        action->doAction(QAccessibleActionInterface::increaseAction());
+        QTRY_COMPARE(value->currentValue().toInt(), 6);
+        action->doAction(QAccessibleActionInterface::decreaseAction());
+        QTRY_COMPARE(value->currentValue().toInt(), 5);
+    }
+    {
+        // Test checkbox actions. We expect the toggle action
+        QAccessibleInterface *interface = document->child(0)->child(1);
+        QVERIFY(interface);
+        QAccessibleActionInterface *action = interface->actionInterface();
+        QVERIFY(action);
+
+        QVERIFY(action->actionNames().contains(QAccessibleActionInterface::toggleAction()));
+        action->doAction(QAccessibleActionInterface::toggleAction());
+        QTRY_COMPARE(evaluateJavaScriptSync(webView.page(), "checked").toBool(), true);
+        action->doAction(QAccessibleActionInterface::toggleAction());
+        QTRY_COMPARE(evaluateJavaScriptSync(webView.page(), "checked").toBool(), false);
+    }
+    {
+        // Test button actions. We expect the press action
+        QAccessibleInterface *interface = document->child(0)->child(2);
+        QVERIFY(interface);
+        QAccessibleActionInterface *action = interface->actionInterface();
+        QVERIFY(action);
+
+        QVERIFY(action->actionNames().contains(QAccessibleActionInterface::pressAction()));
+        action->doAction(QAccessibleActionInterface::pressAction());
+        QTRY_COMPARE(evaluateJavaScriptSync(webView.page(), "pressed").toBool(), true);
+    }
+    {
+        // Test link actions. We expect the press action
+        QSignalSpy spyFinished(&webView, &QWebEngineView::loadFinished);
+        QAccessibleInterface *interface = document->child(0)->child(3);
+        QVERIFY(interface);
+        QAccessibleActionInterface *action = interface->actionInterface();
+        QVERIFY(action);
+
+        QVERIFY(action->actionNames().contains(QAccessibleActionInterface::pressAction()));
+        action->doAction(QAccessibleActionInterface::pressAction());
+        QTRY_COMPARE(spyFinished.size(), 1);
+        QCOMPARE(webView.url(), QUrl("about:blank")); // Changes the page, should be the last test
+    }
 }
 
 static QByteArrayList params = QByteArrayList()

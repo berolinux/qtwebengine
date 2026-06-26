@@ -83,7 +83,6 @@ foreach(arch ${archs})
                 QT_USE_QSTRINGBUILDER
                 QTWEBENGINECORE_VERSION_STR=${QT_REPO_MODULE_VERSION}
                 QTWEBENGINEPROCESS_NAME=${qtWebEngineProcessName}
-                BUILDING_CHROMIUM
                 "${forwardDeclarationMacro}"
             CXX_COMPILE_OPTIONS
                 ${gnCxxCompileOptions}
@@ -192,7 +191,7 @@ foreach(arch ${archs})
                 user_script.cpp user_script.h
                 visited_links_manager_qt.cpp visited_links_manager_qt.h
                 web_contents_adapter.cpp web_contents_adapter.h
-                web_contents_adapter_client.h
+                web_contents_adapter_client.cpp web_contents_adapter_client.h
                 web_contents_delegate_qt.cpp web_contents_delegate_qt.h
                 web_contents_view_qt.cpp web_contents_view_qt.h
                 web_engine_context.cpp web_engine_context.h
@@ -226,6 +225,7 @@ foreach(arch ${archs})
 
         extend_gn_target(${buildGn} CONDITION LINUX AND QT_FEATURE_opengl
             SOURCES
+                ozone/gbm_buffer_factory.cpp ozone/gbm_buffer_factory.h
                 ozone/gl_helper.cpp ozone/gl_helper.h
         )
 
@@ -277,8 +277,7 @@ foreach(arch ${archs})
                 renderer/web_channel_ipc_transport.cpp renderer/web_channel_ipc_transport.h
                 renderer_host/web_channel_ipc_transport_host.cpp renderer_host/web_channel_ipc_transport_host.h
         )
-
-        extend_gn_target(${buildGn}
+        extend_gn_target(${buildGn} CONDITION QT_FEATURE_webengine_extensions
             SOURCES
                 common/extensions/extensions_api_provider_qt.cpp common/extensions/extensions_api_provider_qt.h
                 common/extensions/extensions_client_qt.cpp common/extensions/extensions_client_qt.h
@@ -302,9 +301,6 @@ foreach(arch ${archs})
                 renderer/extensions/extensions_renderer_client_qt.cpp renderer/extensions/extensions_renderer_client_qt.h
                 renderer/extensions/resource_request_policy_qt.cpp renderer/extensions/resource_request_policy_qt.h
                 renderer/plugins/loadable_plugin_placeholder_qt.cpp renderer/plugins/loadable_plugin_placeholder_qt.h
-        )
-        extend_gn_target(${buildGn} CONDITION QT_FEATURE_webengine_extensions
-            SOURCES
                 extensions/api/management_api_delegate_qt.cpp extensions/api/management_api_delegate_qt.h
                 extensions/extension_manager.cpp extensions/extension_manager.h
                 extensions/extension_loader.cpp extensions/extension_loader.h
@@ -314,7 +310,8 @@ foreach(arch ${archs})
                 extensions/webui/select_file_dialog.cpp extensions/webui/select_file_dialog.h
         )
 
-        extend_gn_target(${buildGn} CONDITION QT_FEATURE_webengine_printing_and_pdf
+        extend_gn_target(${buildGn}
+            CONDITION QT_FEATURE_webengine_printing_and_pdf AND QT_FEATURE_webengine_extensions
             SOURCES
                 extensions/pdf_iframe_navigation_throttle_qt.cpp extensions/pdf_iframe_navigation_throttle_qt.h
                 printing/pdf_stream_delegate_qt.cpp printing/pdf_stream_delegate_qt.h
@@ -357,7 +354,6 @@ foreach(arch ${archs})
             enable_background_mode=false
             enable_bluetooth_emulation=false
             enable_compose=false
-            enable_extensions=true
             enable_ipc_fuzzer=false
             enable_ipc_logging=false
             enable_java_templates=false
@@ -451,10 +447,13 @@ foreach(arch ${archs})
             ARGS enable_webenginedriver
             CONDITION QT_FEATURE_webenginedriver
         )
+        extend_gn_list(gnArgArg
+            ARGS enable_extensions
+            CONDITION QT_FEATURE_webengine_extensions
+        )
 
         if(LINUX)
             list(APPEND gnArgArg
-                angle_enable_gl=true
                 use_gtk=false # GTK toolkit bindings
                 use_qt5=false # Qt5 toolkit bindings
                 use_gio=false
@@ -470,7 +469,7 @@ foreach(arch ${archs})
                 ozone_extra_path="${CMAKE_CURRENT_LIST_DIR}/ozone/ozone_extra.gni"
             )
             set(systemLibs libjpeg libpng freetype harfbuzz libwebp libxml
-                opus snappy icu ffmpeg re2 lcms2 libopenjpeg2 libvpx
+                opus snappy icu ffmpeg re2 lcms2 libopenjpeg2 libvpx openh264
             )
             foreach(slib ${systemLibs})
                 extend_gn_list(gnArgArg
@@ -484,6 +483,10 @@ foreach(arch ${archs})
                    CONDITION Perl_FOUND
             )
             endif()
+            extend_gn_list(gnArgArg
+                ARGS angle_enable_gl
+                CONDITION QT_FEATURE_opengl
+            )
             extend_gn_list(gnArgArg
                 ARGS use_system_libxslt
                 CONDITION QT_FEATURE_webengine_system_libxml
@@ -537,6 +540,10 @@ foreach(arch ${archs})
                 CONDITION QT_FEATURE_webengine_ozone_x11
             )
             extend_gn_list(gnArgArg
+                ARGS angle_use_x11_glx
+                CONDITION QT_FEATURE_webengine_ozone_x11 AND QT_FEATURE_xcb_glx_plugin
+            )
+             extend_gn_list(gnArgArg
                 ARGS rtc_use_x11
                 CONDITION QT_FEATURE_webengine_ozone_x11 AND QT_FEATURE_webengine_webrtc
             )

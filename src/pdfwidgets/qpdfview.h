@@ -5,6 +5,7 @@
 #ifndef QPDFVIEW_H
 #define QPDFVIEW_H
 
+#include <QtPdf/QPdfLink>
 #include <QtPdfWidgets/qtpdfwidgetsglobal.h>
 #include <QtWidgets/qabstractscrollarea.h>
 
@@ -94,6 +95,7 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void wheelEvent(QWheelEvent* event) override;
 
 private:
     Q_DECLARE_PRIVATE(QPdfView)

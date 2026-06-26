@@ -89,13 +89,14 @@ public:
     void requestFullScreenMode(const QUrl &origin, bool fullscreen) override;
     bool isFullScreenMode() const override;
     void contextMenuRequested(QWebEngineContextMenuRequest *request) override;
-    void navigationRequested(int navigationType, const QUrl &url, bool &accepted, bool isMainFrame, bool hasFrameData) override;
+    void navigationRequested(int navigationType, const QUrl &url, bool &accepted,
+                             bool isMainFrame, bool hasFrameData, bool userInitiated) override;
     void javascriptDialog(QSharedPointer<QtWebEngineCore::JavaScriptDialogController>) override;
     void runFileChooser(QSharedPointer<QtWebEngineCore::FilePickerController>) override;
     void desktopMediaRequested(QtWebEngineCore::DesktopMediaController *) override;
     void showColorDialog(QSharedPointer<QtWebEngineCore::ColorChooserController>) override;
     void runJavaScript(const QString &script, quint32 worldId, quint64 frameId,
-                       const std::function<void(const QVariant &)> &callback) override;
+                       QtPrivate::SlotObjUniquePtr callback) override;
     void didFetchDocumentMarkup(quint64, const QString&) override { }
     void didFetchDocumentInnerText(quint64, const QString&) override { }
     void printToPdf(const QString &filePath, const QPageLayout &layout, const QPageRanges &ranges,

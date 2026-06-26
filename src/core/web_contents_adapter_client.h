@@ -68,7 +68,7 @@ class WebEngineSettings;
 
 class Q_WEBENGINECORE_EXPORT WebContentsAdapterClient {
 public:
-    // This must match window_open_disposition_list.h.
+    // This must match window_open_disposition.h.
     enum WindowOpenDisposition {
         UnknownDisposition = 0,
         CurrentTabDisposition = 1,
@@ -80,6 +80,8 @@ public:
         SaveToDiskDisposition = 7,
         OffTheRecordDisposition = 8,
         IgnoreActionDisposition = 9,
+        SwitchToTabDisposition = 10,
+        NewPictureInPictureDisposition = 11,
     };
 
     // Must match the values in javascript_dialog_type.h.
@@ -175,14 +177,15 @@ public:
     virtual void windowCloseRejected() = 0;
     virtual void contextMenuRequested(QWebEngineContextMenuRequest *request) = 0;
     virtual void desktopMediaRequested(DesktopMediaController *) = 0;
-    virtual void navigationRequested(int navigationType, const QUrl &url, bool &accepted, bool isMainFrame, bool hasFormData) = 0;
+    virtual void navigationRequested(int navigationType, const QUrl &url, bool &accepted,
+                                     bool isMainFrame, bool hasFormData, bool userInitiated) = 0;
     virtual void requestFullScreenMode(const QUrl &origin, bool fullscreen) = 0;
     virtual bool isFullScreenMode() const = 0;
     virtual void javascriptDialog(QSharedPointer<JavaScriptDialogController>) = 0;
     virtual void runFileChooser(QSharedPointer<FilePickerController>) = 0;
     virtual void showColorDialog(QSharedPointer<ColorChooserController>) = 0;
     virtual void runJavaScript(const QString &script, quint32 worldId, quint64 frameId,
-                               const std::function<void(const QVariant &)> &callback) = 0;
+                               QtPrivate::SlotObjUniquePtr callback) = 0;
     virtual void didFetchDocumentMarkup(quint64 requestId, const QString& result) = 0;
     virtual void didFetchDocumentInnerText(quint64 requestId, const QString& result) = 0;
     virtual void printToPdf(const QString &filePath, const QPageLayout &layout,
